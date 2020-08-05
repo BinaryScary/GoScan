@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 
-	goscan "github.com/BinaryScary/GoScan"
+	"github.com/BinaryScary/goscan"
 )
 
 func main() {
