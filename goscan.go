@@ -16,34 +16,34 @@ import (
 // Scanner Address routing properties and handle to for reading and writing on interface
 // ref: https://github.com/google/gopacket/blob/master/examples/synscan/main.go#L35
 type Scanner struct {
-	// iface is the interface to send packets on.
-	iface *net.Interface
+	// Iface is the interface to send packets on.
+	Iface *net.Interface
 	// destination, gateway (if applicable), and source IP addresses to use.
-	gw, src net.IP
-	dst     *net.IPNet
-	ports   []int
+	Gw, Src net.IP
+	Dst     *net.IPNet
+	Ports   []int
 
-	rps     int
-	timeout int
+	Rps     int
+	Timeout int
 
-	// opts and buf allow us to easily serialize packets in the send()
+	// Opts and buf allow us to easily serialize packets in the send()
 	// method.
-	opts gopacket.SerializeOptions
+	Opts gopacket.SerializeOptions
 	buf  gopacket.SerializeBuffer
 }
 
 // NewScanner create scanner object using routing table object
 func NewScanner(ip *net.IPNet, pArr []int, router routing.Router, rps int, timeout int) (*Scanner, error) {
 	s := &Scanner{
-		dst:   ip,
-		ports: pArr,
-		opts: gopacket.SerializeOptions{
+		Dst:   ip,
+		Ports: pArr,
+		Opts: gopacket.SerializeOptions{
 			FixLengths:       true,
 			ComputeChecksums: true,
 		},
 		buf:     gopacket.NewSerializeBuffer(),
-		rps:     rps,
-		timeout: timeout,
+		Rps:     rps,
+		Timeout: timeout,
 	}
 
 	iface, gw, src, err := router.Route(ip.IP)
@@ -52,8 +52,7 @@ func NewScanner(ip *net.IPNet, pArr []int, router routing.Router, rps int, timeo
 	}
 
 	// set gateway, src ip, and interface in scanner using routing table
-	s.gw, s.src, s.iface = gw, src, iface
-	log.Printf("scanning ip %v with interface %v, gateway %v, src %v", ip, iface.Name, gw, src)
+	s.Gw, s.Src, s.Iface = gw, src, iface
 
 	// return scanner object
 	return s, nil
@@ -88,32 +87,40 @@ func contains(s []int, e int) bool {
 
 // PortState [state 0 = open || 1 = closed]
 type PortState struct {
-	addr  string
-	port  int
-	state int
+	Addr  string
+	Port  int
+	State int
 }
 
-// Scan run scan on scanner object
-func (s *Scanner) Scan() ([]PortState, error) {
-	var results []PortState
+// Scan run scan on scanner object, call as go routine if using unbuffered channels
+func (s *Scanner) Scan(c chan PortState, e chan error) {
+	// var results []PortState
 
 	// requests per second
-	rps := time.Tick(time.Second / time.Duration(s.rps))
+	rps := time.Tick(time.Second / time.Duration(s.Rps))
 	// timeout after requests finish
-	timeout := s.timeout
+	timeout := s.Timeout
 
 	// setup conn handle
 	// don't have to worry about ethernet frame vs pcap openlive
 	conn, err := net.ListenPacket("ip4:tcp", "0.0.0.0")
 	if err != nil {
-		return nil, err
+		close(c)
+
+		e <- err
+		close(e)
+		return
 	}
 	defer conn.Close()
 
 	// get an available source port
 	rawPort, err := GetFreePort()
 	if err != nil {
-		return nil, err
+		close(c)
+
+		e <- err
+		close(e)
+		return
 	}
 
 	// Construct all the network layers we need.
@@ -123,7 +130,7 @@ func (s *Scanner) Scan() ([]PortState, error) {
 	// 	EthernetType: layers.EthernetTypeIPv4,
 	// }
 	ip4 := layers.IPv4{
-		SrcIP:    s.src,
+		SrcIP:    s.Src,
 		DstIP:    net.ParseIP("0.0.0.0"), // set value to destination ip when scanning
 		Version:  4,
 		TTL:      225,
@@ -147,7 +154,7 @@ func (s *Scanner) Scan() ([]PortState, error) {
 			}
 
 			// ip in cidr
-			if !s.dst.Contains(net.ParseIP(addr.String()).To4()) {
+			if !s.Dst.Contains(net.ParseIP(addr.String()).To4()) {
 				continue
 			}
 
@@ -162,15 +169,19 @@ func (s *Scanner) Scan() ([]PortState, error) {
 				if tcp.DstPort != layers.TCPPort(rawPort) {
 					continue
 				}
+				// open ports
 				if tcp.SYN && tcp.ACK {
-					log.Printf("%v port %v open", addr.String(), tcp.SrcPort)
+					// log.Printf("%v port %v open", addr.String(), tcp.SrcPort)
 
-					results = append(results, PortState{addr.String(), int(tcp.SrcPort), 0})
+					c <- PortState{addr.String(), int(tcp.SrcPort), 0}
+					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 0})
 				}
+				// closed ports
 				if tcp.RST {
 					// log.Printf("%v port %v closed", addr.String(), tcp.SrcPort)
 
-					results = append(results, PortState{addr.String(), int(tcp.SrcPort), 1})
+					c <- PortState{addr.String(), int(tcp.SrcPort), 1}
+					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 1})
 				}
 			}
 		}
@@ -181,11 +192,11 @@ func (s *Scanner) Scan() ([]PortState, error) {
 
 	go func() {
 		defer wg.Done()
-		ip := s.dst.IP
-		for ip := ip.Mask(s.dst.Mask); s.dst.Contains(ip); inc(ip) {
+		ip := s.Dst.IP
+		for ip := ip.Mask(s.Dst.Mask); s.Dst.Contains(ip); inc(ip) {
 			// set ip address of packet
 			ip4.DstIP = ip.To4()
-			for _, port := range s.ports {
+			for _, port := range s.Ports {
 				<-rps
 
 				// fmt.Printf("%v %v\n", ip, port)
@@ -214,13 +225,17 @@ func (s *Scanner) Scan() ([]PortState, error) {
 
 	wg.Wait()
 
-	return results, nil
+	close(c)
+
+	e <- nil
+	close(e)
+	return
 }
 
 // send sends the given layers as a single packet on the network.
 func (s *Scanner) send(conn net.PacketConn, dst net.IP, l ...gopacket.SerializableLayer) (int, error) {
 	buf := gopacket.NewSerializeBuffer()
-	if err := gopacket.SerializeLayers(buf, s.opts, l...); err != nil {
+	if err := gopacket.SerializeLayers(buf, s.Opts, l...); err != nil {
 		return 0, err
 	}
 	return conn.WriteTo(buf.Bytes(), &net.IPAddr{IP: dst})
@@ -267,7 +282,7 @@ type Options struct {
 	Timeout  int
 }
 
-//Run function parses options and runs scanner
+//Run function parses options and runs scanner to print output, nothin returned
 func Run(options *Options) {
 	// remove timestamp from logs
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
@@ -286,11 +301,24 @@ func Run(options *Options) {
 
 	s := SetupScanner(options.Range, ports, rps, timeout)
 
-	// port to scan
-	results, err := s.Scan()
+	log.Printf("scanning ip %s with interface %v, gateway %v, src %v", s.Dst.String(), s.Iface.Name, s.Gw, s.Src)
+
+	// setup channels and scan
+	c := make(chan PortState)
+	e := make(chan error, 1)
+	go s.Scan(c, e)
+
+	// parse results while scanning
+	for i := range c {
+		if i.State == 0 {
+			log.Printf("%s port %v open", i.Addr, i.Port)
+		}
+		if i.State == 1 {
+			log.Printf("%s port %v closed", i.Addr, i.Port)
+		}
+	}
+	err := <-e
 	if err != nil {
 		log.Printf("unable to scan %s: %v", options.Range, err)
-	}
-	if results == nil {
 	}
 }
