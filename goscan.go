@@ -13,9 +13,9 @@ import (
 	"github.com/google/gopacket/routing"
 )
 
+// Scanner Address routing properties and handle to for reading and writing on interface
 // ref: https://github.com/google/gopacket/blob/master/examples/synscan/main.go#L35
-// Address routing properties and handle to for reading and writing on interface
-type scanner struct {
+type Scanner struct {
 	// iface is the interface to send packets on.
 	iface *net.Interface
 	// destination, gateway (if applicable), and source IP addresses to use.
@@ -32,9 +32,9 @@ type scanner struct {
 	buf  gopacket.SerializeBuffer
 }
 
-// create scanner object using routing table object
-func newScanner(ip *net.IPNet, pArr []int, router routing.Router, rps int, timeout int) (*scanner, error) {
-	s := &scanner{
+// NewScanner create scanner object using routing table object
+func NewScanner(ip *net.IPNet, pArr []int, router routing.Router, rps int, timeout int) (*Scanner, error) {
+	s := &Scanner{
 		dst:   ip,
 		ports: pArr,
 		opts: gopacket.SerializeOptions{
@@ -92,8 +92,8 @@ type PortState struct {
 	state int
 }
 
-// run scan on scanner object
-func (s *scanner) scan() ([]PortState, error) {
+// Scan run scan on scanner object
+func (s *Scanner) Scan() ([]PortState, error) {
 	var results []PortState
 
 	// requests per second
@@ -217,7 +217,7 @@ func (s *scanner) scan() ([]PortState, error) {
 }
 
 // send sends the given layers as a single packet on the network.
-func (s *scanner) send(conn net.PacketConn, dst net.IP, l ...gopacket.SerializableLayer) (int, error) {
+func (s *Scanner) send(conn net.PacketConn, dst net.IP, l ...gopacket.SerializableLayer) (int, error) {
 	buf := gopacket.NewSerializeBuffer()
 	if err := gopacket.SerializeLayers(buf, s.opts, l...); err != nil {
 		return 0, err
@@ -234,7 +234,12 @@ func inc(ip net.IP) {
 	}
 }
 
-func setupScanner(ipnet *net.IPNet, ports []int, rps int, timeout int) *scanner {
+// SetupScanner setup a scanner
+func SetupScanner(ipRange string, ports []int, rps int, timeout int) *Scanner {
+	// ip is stored as 16 by default, comparisons will fail if byte size are missmatched
+	// ip := net.ParseIP("172.217.13.100").To4()
+	_, ipnet, err := net.ParseCIDR(ipRange)
+
 	// create routing table from system routes
 	router, err := routing.New()
 	if err != nil {
@@ -243,7 +248,7 @@ func setupScanner(ipnet *net.IPNet, ports []int, rps int, timeout int) *scanner 
 	}
 
 	// scanner init
-	s, err := newScanner(ipnet, ports, router, rps, timeout)
+	s, err := NewScanner(ipnet, ports, router, rps, timeout)
 	if err != nil {
 		log.Printf("unable to create scanner: %v", err)
 		return nil
@@ -266,10 +271,6 @@ func Run(options *Options) {
 	// remove timestamp from logs
 	log.SetFlags(log.Flags() &^ (log.Ldate | log.Ltime))
 
-	// ip is stored as 16 by default, comparisons will fail if byte size are missmatched
-	// ip := net.ParseIP("172.217.13.100").To4()
-	ip, ipnet, err := net.ParseCIDR(options.Range)
-
 	var ports []int
 	sPorts := strings.Split(options.Ports, ",")
 	ports = make([]int, len(sPorts))
@@ -282,12 +283,12 @@ func Run(options *Options) {
 	// timeout after packet is sent
 	timeout := options.Timeout
 
-	s := setupScanner(ipnet, ports, rps, timeout)
+	s := SetupScanner(options.Range, ports, rps, timeout)
 
 	// port to scan
-	results, err := s.scan()
+	results, err := s.Scan()
 	if err != nil {
-		log.Printf("unable to scan %v: %v", ip, err)
+		log.Printf("unable to scan %s: %v", options.Range, err)
 	}
 	if results == nil {
 	}
