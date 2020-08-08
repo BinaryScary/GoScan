@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/gopacket"
@@ -187,43 +186,45 @@ func (s *Scanner) Scan(c chan PortState, e chan error) {
 		}
 	}()
 
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
+	// wg := &sync.WaitGroup{}
+	// wg.Add(1)
 
-	go func() {
-		defer wg.Done()
-		ip := s.Dst.IP
-		for ip := ip.Mask(s.Dst.Mask); s.Dst.Contains(ip); inc(ip) {
-			// set ip address of packet
-			ip4.DstIP = ip.To4()
-			for _, port := range s.Ports {
-				<-rps
+	// go func() {
+	// defer wg.Done()
+	ip := s.Dst.IP
+	for ip := ip.Mask(s.Dst.Mask); s.Dst.Contains(ip); inc(ip) {
+		// set ip address of packet
+		ip4.DstIP = ip.To4()
+		for _, port := range s.Ports {
+			<-rps
 
-				// fmt.Printf("%v %v\n", ip, port)
-				// set port to send SYN packet
-				tcp.DstPort = layers.TCPPort(port)
+			// fmt.Printf("%v %v\n", ip, port)
+			// set port to send SYN packet
+			tcp.DstPort = layers.TCPPort(port)
 
-				// send packed
-				// err = s.send(&eth, &ip4, &tcp)
-				_, err := s.send(conn, ip, &tcp)
-				if err != nil {
-					// host down/doesn't exist
-					// log.Printf("error sending packet to port %v: %v", tcp.DstPort, err)
-				}
+			// send packed
+			// err = s.send(&eth, &ip4, &tcp)
+			_, err := s.send(conn, ip, &tcp)
+			if err != nil {
+				// host down/doesn't exist
+				// log.Printf("error sending packet to port %v: %v", tcp.DstPort, err)
 			}
 		}
-	}()
+	}
+	// }()
+	// wg.Wait()
 
 	if timeout > 0 {
-		timer := time.AfterFunc(time.Duration(timeout)*time.Second, func() {
-			conn.Close()
-		})
-		defer timer.Stop()
+		// async timer
+		// timer := time.AfterFunc(time.Duration(timeout)*time.Second, func() {
+		// 	conn.Close()
+		// })
+		// defer timer.Stop()
+
+		time.Sleep(time.Duration(timeout) * time.Millisecond)
 	} else {
 		conn.Close()
 	}
-
-	wg.Wait()
 
 	close(c)
 
@@ -275,7 +276,6 @@ func SetupScanner(ipRange string, ports []int, rps int, timeout int) *Scanner {
 
 //Options struct to hold flags
 type Options struct {
-	// edge-case: IP/32 only scans the first IP in range
 	Range    string
 	Ports    string
 	Requests int
@@ -296,7 +296,7 @@ func Run(options *Options) {
 
 	// requests per second
 	rps := options.Requests
-	// timeout after packet is sent
+	// timeout in milliseconds after packet is sent
 	timeout := options.Timeout
 
 	s := SetupScanner(options.Range, ports, rps, timeout)
