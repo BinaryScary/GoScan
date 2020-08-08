@@ -88,6 +88,7 @@ func contains(s []int, e int) bool {
 
 // PortState [state 0 = open || 1 = closed]
 type PortState struct {
+	addr  string
 	port  int
 	state int
 }
@@ -164,12 +165,12 @@ func (s *Scanner) Scan() ([]PortState, error) {
 				if tcp.SYN && tcp.ACK {
 					log.Printf("%v port %v open", addr.String(), tcp.SrcPort)
 
-					results = append(results, PortState{int(tcp.SrcPort), 0})
+					results = append(results, PortState{addr.String(), int(tcp.SrcPort), 0})
 				}
 				if tcp.RST {
 					// log.Printf("%v port %v closed", addr.String(), tcp.SrcPort)
 
-					results = append(results, PortState{int(tcp.SrcPort), 1})
+					results = append(results, PortState{addr.String(), int(tcp.SrcPort), 1})
 				}
 			}
 		}
