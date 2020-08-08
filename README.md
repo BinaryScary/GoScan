@@ -1,5 +1,5 @@
 # GoScan
-**Raw Packet Syn Scanner**
+**Raw Packet Syn Scanner Library**
 ```
 $ GoScan --help
 
