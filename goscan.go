@@ -217,28 +217,28 @@ func (s *Scanner) Scan(c chan PortState, e chan error) {
 					// log.Printf("%v port %v open", addr.String(), tcp.SrcPort)
 
 					// go routine shouldn't manage go channel buffers
-					// for {
-					// 	if len(c) == cap(c) {
-					// 		continue
-					// 	} else {
-					c <- PortState{addr.String(), int(tcp.SrcPort), 0}
-					// 		break
-					// 	}
-					// }
+					for {
+						if len(c) == cap(c) {
+							continue
+						} else {
+							c <- PortState{addr.String(), int(tcp.SrcPort), 0}
+							break
+						}
+					}
 					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 0})
 				}
 				// closed ports
 				if tcp.RST {
 					// log.Printf("%v port %v closed", addr.String(), tcp.SrcPort)
 
-					// for {
-					// 	if len(c) == cap(c) {
-					// 		continue
-					// 	} else {
-					c <- PortState{addr.String(), int(tcp.SrcPort), 1}
-					// 		break
-					// 	}
-					// }
+					for {
+						if len(c) == cap(c) {
+							continue
+						} else {
+							c <- PortState{addr.String(), int(tcp.SrcPort), 1}
+							break
+						}
+					}
 					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 1})
 				}
 			}
