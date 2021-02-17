@@ -320,9 +320,9 @@ func SetupScanner(ipRange string, ports []int, rps int, timeout int) *Scanner {
 	// ip is stored as 16 by default, comparisons will fail if byte size are missmatched
 	// ip := net.ParseIP("172.217.13.100").To4()
 	_, ipnet, err := net.ParseCIDR(ipRange)
-    if err != nil {
-        log.Printf("IP Parsing error: %v", err)
-    }
+	if err != nil {
+		log.Printf("IP Parsing error: %v", err)
+	}
 
 	// create routing table from system routes
 	router, err := routing.New()
