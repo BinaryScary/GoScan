@@ -2,6 +2,8 @@ package goscan
 
 import (
 	"log"
+	"math"
+	"math/rand"
 	"net"
 	"strconv"
 	"strings"
@@ -91,9 +93,40 @@ type PortState struct {
 	State int
 }
 
-// Scan run scan on scanner object, call as go routine if using unbuffered channels
+// type queueEntry struct {
+// 	Addr net.Addr
+// 	Port layers.TCPPort
+// }
+
+// func queueContains(s []queueEntry, e queueEntry) bool {
+// 	for _, a := range s {
+// 		if a == e {
+// 			return true
+// 		}
+// 	}
+// 	return false
+// }
+
+// removes element and returns true if element is contain within slice
+func uint32Contains(s []uint32, e uint32) bool {
+	// for i := 0; i< len(s); i++{
+	// 	if s[i] == e {
+	// 		s = append(s[:i], s[i+1:]...)
+	// 		return true
+	// 	}
+	// }
+	for _, a := range s {
+		if a == e {
+			return true
+		}
+	}
+	return false
+}
+
+// Scan run scan on scanner object, use buffered channels
 func (s *Scanner) Scan(c chan PortState, e chan error) {
 	// var results []PortState
+	rand.Seed(time.Now().UnixNano())
 
 	// requests per second
 	rps := time.Tick(time.Second / time.Duration(s.Rps))
@@ -139,11 +172,15 @@ func (s *Scanner) Scan(c chan PortState, e chan error) {
 		SrcPort: layers.TCPPort(rawPort),
 		DstPort: layers.TCPPort(0), // set value to destination port when scanning
 		SYN:     true,
+		Seq:     uint32(1000000000), // generate random sequence number
 	}
 	tcp.SetNetworkLayerForChecksum(&ip4)
 
+	var ackNums []uint32
+
 	go func() {
 		data := make([]byte, 4096)
+		// var queue []queueEntry
 		for {
 			n, addr, err := conn.ReadFrom(data)
 
@@ -168,18 +205,40 @@ func (s *Scanner) Scan(c chan PortState, e chan error) {
 				if tcp.DstPort != layers.TCPPort(rawPort) {
 					continue
 				}
+
+				// TODO: remove matching acknowledgment numbers
+				// should I mutex lock?
+				if !uint32Contains(ackNums, tcp.Ack) {
+					continue
+				}
+
 				// open ports
 				if tcp.SYN && tcp.ACK {
 					// log.Printf("%v port %v open", addr.String(), tcp.SrcPort)
 
-					c <- PortState{addr.String(), int(tcp.SrcPort), 0}
+					// go routine shouldn't manage go channel buffers
+					for {
+						if len(c) == cap(c) {
+							continue
+						} else {
+							c <- PortState{addr.String(), int(tcp.SrcPort), 0}
+							break
+						}
+					}
 					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 0})
 				}
 				// closed ports
 				if tcp.RST {
 					// log.Printf("%v port %v closed", addr.String(), tcp.SrcPort)
 
-					c <- PortState{addr.String(), int(tcp.SrcPort), 1}
+					for {
+						if len(c) == cap(c) {
+							continue
+						} else {
+							c <- PortState{addr.String(), int(tcp.SrcPort), 1}
+							break
+						}
+					}
 					// results = append(results, PortState{addr.String(), int(tcp.SrcPort), 1})
 				}
 			}
@@ -201,6 +260,11 @@ func (s *Scanner) Scan(c chan PortState, e chan error) {
 			// fmt.Printf("%v %v\n", ip, port)
 			// set port to send SYN packet
 			tcp.DstPort = layers.TCPPort(port)
+
+			randSeq := 1000000000 + rand.Intn(math.MaxInt32)
+			tcp.Seq = uint32(randSeq)
+
+			ackNums = append(ackNums, tcp.Seq+1)
 
 			// send packed
 			// err = s.send(&eth, &ip4, &tcp)
@@ -304,7 +368,7 @@ func Run(options *Options) {
 	log.Printf("scanning ip %s with interface %v, gateway %v, src %v", s.Dst.String(), s.Iface.Name, s.Gw, s.Src)
 
 	// setup channels and scan
-	c := make(chan PortState)
+	c := make(chan PortState, 1)
 	e := make(chan error, 1)
 	go s.Scan(c, e)
 
