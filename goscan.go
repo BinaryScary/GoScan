@@ -322,6 +322,7 @@ func SetupScanner(ipRange string, ports []int, rps int, timeout int) *Scanner {
 	_, ipnet, err := net.ParseCIDR(ipRange)
 	if err != nil {
 		log.Printf("IP Parsing error: %v", err)
+		return nil
 	}
 
 	// create routing table from system routes
